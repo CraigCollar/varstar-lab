@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VarStar Lab — light curves, periods, distances</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>VarStar&nbsp;Lab <span class="sub">photos → light curve → period → distance</span></h1>
+  <span class="target-chip" id="targetChip">V0756 CrA · HADS(B)</span>
+  <span class="spacer"></span>
+  <button class="small ghost" id="btnHelp">How it works</button>
+  <button class="small ghost" id="btnReset">New session</button>
+</header>
+
+<main>
+
+<div id="helpPanel" style="display:none">
+  <section class="step open">
+    <div class="body" style="padding-top:18px">
+      <h3 style="margin-top:0">How a photograph becomes a distance</h3>
+      <p class="hint tip" style="font-size:13.5px">
+        Your target, <b>V0756 CrA</b>, is a high-amplitude δ Scuti star (type HADS(B)).
+        That classification is the whole reason a distance is reachable: δ Scuti stars
+        obey a <b>period–luminosity relation</b>, so measuring how fast the star pulses
+        tells you how intrinsically bright it is. Compare that with how bright it
+        <em>looks</em>, and the difference is distance. It is the same logic Henrietta
+        Leavitt used on Cepheids, one rung down the ladder.
+      </p>
+      <div class="eq">1. aperture photometry on every frame → flux(t) for the target and comparison stars</div>
+      <div class="eq">2. Δm = −2.5 log₁₀(F_target / ΣF_comp) → a light curve immune to cloud and airmass</div>
+      <div class="eq">3. Lomb–Scargle + phase dispersion minimisation → the pulsation period P</div>
+      <div class="eq">4. M_V = −2.94 log₁₀P − 1.34 → absolute magnitude (Ziaali et al. 2019)</div>
+      <div class="eq">5. d = 10^((⟨V⟩ − M_V − A_V)/5 + 1) parsecs → the distance</div>
+      <p class="hint tip">
+        Two things the app will nag you about, because they are where this measurement
+        usually goes wrong. First, a <b>distance needs an apparent magnitude</b>, not
+        just a differential one — so you must supply catalog magnitudes for at least
+        one comparison star. Second, <b>one short night is not enough</b>: if a
+        continuous run does not cover a full pulsation cycle, the period picks up a
+        1 cycle/day ambiguity that no amount of extra short nights will fix.
+      </p>
+      <button class="small" onclick="document.getElementById('helpPanel').style.display='none'">Close</button>
+    </div>
+  </section>
+</div>
+
+<!-- ================================================== 1. LOAD ========== -->
+<section class="step open" id="step1">
+  <div class="head">
+    <div class="step-num"><span>1</span></div>
+    <div class="grow">
+      <div class="step-title">Load your exposures</div>
+      <div class="step-hint" id="hint1">FITS, TIFF, PNG/JPEG or camera RAW — or simulate a run to try the pipeline</div>
+    </div>
+    <span class="chev">▶</span>
+  </div>
+  <div class="body">
+
+    <div class="dropzone" id="dropzone">
+      <b>Drop your image files here</b> or click to choose<br>
+      <span style="font-size:12px">
+        FITS (.fits/.fit/.fts) strongly preferred — it keeps the linear pixel values photometry needs.
+        Also accepts TIFF, PNG, JPEG, and RAW (.cr2/.cr3/.nef/.arw/.dng).
+        Do <b>not</b> stack, and do not apply curves or auto-brightness.
+      </span>
+      <input type="file" id="fileInput" multiple accept=".fits,.fit,.fts,.fits.gz,.tif,.tiff,.png,.jpg,.jpeg,.cr2,.cr3,.nef,.arw,.dng,.orf,.raf,.rw2" style="display:none">
+    </div>
+
+    <details>
+      <summary>No data yet? Simulate an observing run of V0756 CrA</summary>
+      <div class="dbody">
+        <p class="hint tip" style="margin-top:0">
+          These generate real FITS frames of a synthetic star field — with field drift
+          (auto-guiding off, as the proposal specifies), changing seeing, transparency
+          variations, Poisson and read noise, and a genuine double-mode HADS light
+          curve injected at P = 0.1071934 d. The pipeline has no knowledge of the
+          injected values, so recovering them is a real test.
+        </p>
+        <div class="presets" id="presets"></div>
+        <div class="row tight">
+          <label class="field"><span class="lbl">Frames</span>
+            <input type="number" id="demoFrames" min="20" max="1200" step="10" placeholder="preset"></label>
+          <label class="field"><span class="lbl">Cadence (s)</span>
+            <input type="number" id="demoCadence" min="5" max="600" step="5" placeholder="preset"></label>
+          <label class="field"><span class="lbl">Seed</span>
+            <input type="number" id="demoSeed" placeholder="preset"></label>
+          <label class="check" style="margin-bottom:6px">
+            <input type="checkbox" id="demoSecondMode" checked> inject the second (overtone) mode</label>
+          <button class="primary" id="btnDemo">Simulate run</button>
+        </div>
+      </div>
+    </details>
+
+    <div class="progress" id="prog1" style="display:none">
+      <div class="bar"><div></div></div><div class="txt"></div>
+    </div>
+
+    <div id="framesOut"></div>
+  </div>
+</section>
+
+<!-- ================================================== 2. STARS ========= -->
+<section class="step locked" id="step2">
+  <div class="head">
+    <div class="step-num"><span>2</span></div>
+    <div class="grow">
+      <div class="step-title">Pick the target and its comparison stars</div>
+      <div class="step-hint" id="hint2">Differential photometry needs at least one steady comparison star</div>
+    </div>
+    <span class="chev">▶</span>
+  </div>
+  <div class="body">
+
+    <div class="row tight">
+      <label class="field"><span class="lbl">Reference frame</span>
+        <input type="number" id="refFrame" value="1" min="1" step="1" style="width:90px"></label>
+      <label class="field"><span class="lbl">Colour channel</span>
+        <select id="channel">
+          <option value="G" selected>Green (closest to Johnson V)</option>
+          <option value="L">Luminance</option>
+          <option value="R">Red</option>
+          <option value="B">Blue</option>
+          <option value="SUM">R+G+B sum</option>
+        </select></label>
+      <label class="field"><span class="lbl">Detection FWHM (px)</span>
+        <input type="number" id="detFwhm" value="4" min="1.5" max="25" step="0.5" style="width:95px"></label>
+      <label class="field"><span class="lbl">Threshold (σ)</span>
+        <input type="number" id="detThresh" value="5" min="2" max="50" step="0.5" style="width:90px"></label>
+      <label class="field"><span class="lbl">Stretch</span>
+        <select id="stretch">
+          <option value="asinh" selected>asinh</option>
+          <option value="sqrt">sqrt</option>
+          <option value="log">log</option>
+          <option value="linear">linear</option>
+        </select></label>
+      <button class="primary" id="btnDetect">Find stars</button>
+    </div>
+
+    <div id="detectOut"></div>
+
+    <div class="canvas-wrap" id="canvasWrap" style="display:none">
+      <div class="canvas-tools">
+        <span class="mode-btns" id="modeBtns">
+          <button data-mode="target" class="active">Set target</button>
+          <button data-mode="comp">Add comparison</button>
+          <button data-mode="remove">Remove</button>
+        </span>
+        <button class="small ghost" id="btnAutoPick">Auto-pick</button>
+        <button class="small ghost" id="btnClearPick">Clear</button>
+        <span class="spacer"></span>
+        <label class="check" style="font-size:12px"><input type="checkbox" id="showAll" checked> show undetected sources</label>
+        <button class="small ghost" id="btnZoomOut">−</button>
+        <span id="zoomLbl" style="font-family:var(--mono);font-size:11.5px;color:var(--muted)">1.0×</span>
+        <button class="small ghost" id="btnZoomIn">+</button>
+        <button class="small ghost" id="btnZoomFit">fit</button>
+      </div>
+      <canvas id="fieldCanvas"></canvas>
+      <div class="canvas-overlay-hint">click a star to assign it · drag to pan · scroll to zoom</div>
+    </div>
+
+    <div id="pickOut"></div>
+  </div>
+</section>
+
+<!-- ================================================== 3. PHOTOMETRY ==== -->
+<section class="step locked" id="step3">
+  <div class="head">
+    <div class="step-num"><span>3</span></div>
+    <div class="grow">
+      <div class="step-title">Measure the light curve</div>
+      <div class="step-hint" id="hint3">Aperture photometry on every frame, re-registered for drift</div>
+    </div>
+    <span class="chev">▶</span>
+  </div>
+  <div class="body">
+
+    <div class="row tight">
+      <label class="field"><span class="lbl">FWHM (px)</span>
+        <input type="number" id="phFwhm" value="4" min="1.5" step="0.1" style="width:90px"></label>
+      <label class="field"><span class="lbl">Aperture (× FWHM)</span>
+        <input type="number" id="phAp" value="1.5" min="0.5" max="6" step="0.1" style="width:105px"></label>
+      <label class="field"><span class="lbl">Sky annulus in</span>
+        <input type="number" id="phIn" value="3" min="1" max="12" step="0.5" style="width:95px"></label>
+      <label class="field"><span class="lbl">out</span>
+        <input type="number" id="phOut" value="5" min="1.5" max="20" step="0.5" style="width:85px"></label>
+      <label class="field"><span class="lbl">Gain (e⁻/ADU)</span>
+        <input type="number" id="phGain" value="1" min="0.01" step="0.1" style="width:100px"></label>
+      <label class="field"><span class="lbl">Read noise (e⁻)</span>
+        <input type="number" id="phRead" value="0" min="0" step="0.5" style="width:105px"></label>
+    </div>
+    <div class="row tight" style="margin-top:10px">
+      <label class="check"><input type="checkbox" id="phTrack" checked> re-centre on each frame (drift tracking)</label>
+      <label class="check"><input type="checkbox" id="phAlign" checked> cross-correlation pre-alignment</label>
+      <span class="spacer"></span>
+      <button class="primary" id="btnPhot">Run photometry</button>
+    </div>
+    <p class="hint">An aperture of ~1.5 × FWHM maximises signal-to-noise for faint stars.
+      Widen it if the tracking is poor or the seeing varies a lot; the annulus must sit
+      outside the stellar wings but inside any neighbour.</p>
+
+    <div class="progress" id="prog3" style="display:none">
+      <div class="bar"><div></div></div><div class="txt"></div>
+    </div>
+    <div id="photOut"></div>
+  </div>
+</section>
+
+<!-- ================================================== 4. PERIOD ======== -->
+<section class="step locked" id="step4">
+  <div class="head">
+    <div class="step-num"><span>4</span></div>
+    <div class="grow">
+      <div class="step-title">Find the pulsation period</div>
+      <div class="step-hint" id="hint4">Lomb–Scargle, cross-checked against phase dispersion minimisation</div>
+    </div>
+    <span class="chev">▶</span>
+  </div>
+  <div class="body">
+
+    <div class="row tight">
+      <label class="field"><span class="lbl">Search from (d)</span>
+        <input type="number" id="pMin" value="0.02" min="0.001" step="0.005" style="width:100px"></label>
+      <label class="field"><span class="lbl">to (d)</span>
+        <input type="number" id="pMax" value="0.30" min="0.005" step="0.01" style="width:95px"></label>
+      <label class="field"><span class="lbl">Harmonics</span>
+        <input type="number" id="nHarm" value="3" min="1" max="8" step="1" style="width:85px"></label>
+      <label class="field"><span class="lbl">Bootstrap trials</span>
+        <input type="number" id="nBoot" value="150" min="0" max="1000" step="50" style="width:105px"></label>
+      <label class="field"><span class="lbl">Time system</span>
+        <select id="timeSys">
+          <option value="bjd_tdb" selected>BJD (TDB) — best</option>
+          <option value="hjd">HJD (UTC)</option>
+          <option value="none">JD (UTC), uncorrected</option>
+        </select></label>
+      <label class="field"><span class="lbl">Detrend order</span>
+        <select id="detrend">
+          <option value="-1" selected>none</option>
+          <option value="0">subtract mean</option>
+          <option value="1">remove linear trend</option>
+          <option value="2">remove quadratic</option>
+        </select></label>
+    </div>
+    <div class="row tight" style="margin-top:10px">
+      <label class="field grow"><span class="lbl">Target RA / Dec (for the light-travel-time correction)</span>
+        <div class="row tight">
+          <input type="text" id="raIn" value="18 25 36.26" style="width:135px">
+          <input type="text" id="decIn" value="-42 13 35.8" style="width:135px">
+        </div></label>
+      <span class="spacer"></span>
+      <button class="primary" id="btnPeriod">Analyse period</button>
+    </div>
+
+    <div class="progress" id="prog4" style="display:none">
+      <div class="bar"><div></div></div><div class="txt"></div>
+    </div>
+    <div id="periodOut"></div>
+  </div>
+</section>
+
+<!-- ================================================== 5. DISTANCE ====== -->
+<section class="step locked" id="step5">
+  <div class="head">
+    <div class="step-num"><span>5</span></div>
+    <div class="grow">
+      <div class="step-title">Calculate the distance</div>
+      <div class="step-hint" id="hint5">Period → absolute magnitude → distance modulus → parsecs</div>
+    </div>
+    <span class="chev">▶</span>
+  </div>
+  <div class="body">
+
+    <div class="row tight">
+      <label class="field grow" style="min-width:280px"><span class="lbl">Period–luminosity relation</span>
+        <select id="relation"></select></label>
+      <label class="field"><span class="lbl">Period to use</span>
+        <select id="periodSource">
+          <option value="measured" selected>the one I measured</option>
+          <option value="catalog">published catalog period</option>
+          <option value="manual">enter manually</option>
+        </select></label>
+      <label class="field" id="manualPeriodWrap" style="display:none"><span class="lbl">Period (d)</span>
+        <input type="number" id="manualPeriod" step="0.0000001" style="width:120px"></label>
+    </div>
+
+    <div class="row tight" style="margin-top:10px">
+      <label class="field"><span class="lbl">Mean apparent V</span>
+        <input type="number" id="meanMag" step="0.01" placeholder="from photometry" style="width:135px"></label>
+      <label class="field"><span class="lbl">± σ</span>
+        <input type="number" id="meanMagErr" step="0.01" placeholder="auto" style="width:80px"></label>
+      <label class="field"><span class="lbl">E(B−V)</span>
+        <input type="number" id="ebv" step="0.001" placeholder="0 = none" style="width:105px"></label>
+      <label class="field"><span class="lbl">± σ</span>
+        <input type="number" id="ebvErr" step="0.001" placeholder="auto" style="width:80px"></label>
+      <button class="small" id="btnEbv">Fetch from dust map</button>
+      <label class="field"><span class="lbl">T_eff (K, optional)</span>
+        <input type="number" id="teff" step="50" placeholder="e.g. 7400" style="width:120px"></label>
+    </div>
+    <p class="hint">Interstellar dust makes the star look fainter and therefore <em>further</em>
+      than it is; A_V = 3.1 × E(B−V) corrects for it. Leaving it at zero puts a floor
+      under your distance, not a true value. A temperature — which the proposal's
+      spectroscopy half can supply — additionally unlocks the radius and a mass estimate.</p>
+
+    <div class="row tight" style="margin-top:6px">
+      <button class="primary" id="btnDistance">Calculate distance</button>
+      <button id="btnGaia">Check against Gaia parallax</button>
+      <span class="spacer"></span>
+      <button class="small ghost" id="btnCsv">light curve .csv</button>
+      <button class="small ghost" id="btnJson">report .json</button>
+      <button class="small ghost" id="btnZip">everything .zip</button>
+    </div>
+
+    <div id="distOut"></div>
+  </div>
+</section>
+
+<p class="footer-note">
+  VarStar&nbsp;Lab · built for “Photographing and Modeling Variable Stars” — Luke Prasarttongosoth, Aidan Hawkins, Craig Collar<br>
+  Period–luminosity relations: Ziaali et al. (2019); McNamara (2011); Nemec, Nemec &amp; Lutz (1994).
+  Period errors after Montgomery &amp; O’Donoghue (1999). PDM after Stellingwerf (1978).
+</p>
+
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

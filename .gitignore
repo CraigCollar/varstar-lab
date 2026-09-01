@@ -1,0 +1,23 @@
+# Session working data: uploaded/simulated frames, hundreds of MB per run.
+# Sessions live in memory, so these directories are disposable.
+data/
+
+# Server output
+server.log
+*.log
+
+# Generated figures (regenerate with selftest.py / apitest.py)
+selftest_plots/
+showcase/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
